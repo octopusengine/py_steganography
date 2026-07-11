@@ -1,7 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import random
+
+from lib.bitmap_font import FONT_9x13, FONT_H, FONT_W
 
 try:
     from PIL import Image, ImageDraw
@@ -14,13 +16,13 @@ PRINT_W = 1240   # px
 PRINT_H = 1754   # px
 
 # font_scale → (subpixel_print_scale, char_w_logical, char_h_logical)
-# subpixel_print_scale: kolik tiskových px zabírá 1 subpixel
-# Logická mřížka: COLS = PRINT_W // (2 * sp), ROWS = PRINT_H // (2 * sp)
+# subpixel_print_scale: print pixels per one subpixel
+# Logical grid: COLS = PRINT_W // (2 * sp), ROWS = PRINT_H // (2 * sp)
 FONT_CONFIGS = {
-    1: dict(sp=4, cw=10, ch=15),   # malý
-    2: dict(sp=3, cw=20, ch=29),   # střední
-    3: dict(sp=2, cw=30, ch=43),   # velký
-    4: dict(sp=2, cw=40, ch=57),   # extra velký
+    1: dict(sp=4, cw=10, ch=15),   # small
+    2: dict(sp=3, cw=20, ch=29),   # medium
+    3: dict(sp=2, cw=30, ch=43),   # large
+    4: dict(sp=2, cw=40, ch=57),   # extra large
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -72,620 +74,14 @@ def deterministic_noise_layer(key: str, cols, rows, block_size=1):
 
     return layer
 
-
-# Bitmap font 9x13 px.
-FONT_9x13 = {
-    ' ': [0]*13,
-    'A': [0b000110000,
-          0b001111000,
-          0b001111000,
-          0b011001100,
-          0b011001100,
-          0b110000110,
-          0b110000110,
-          0b111111110,
-          0b111111110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b000000000],
-    'B': [0b111111000,
-          0b110001100,
-          0b110001100,
-          0b110001100,
-          0b111111000,
-          0b111111100,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b111111100,
-          0b000000000],
-    'C': [0b011111100,
-          0b110000110,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000110,
-          0b011111100,
-          0b000000000],
-    'D': [0b111111000,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b111111000,
-          0b000000000],
-    'E': [0b111111110,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b111111000,
-          0b111111000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b111111110,
-          0b000000000],
-    'F': [0b111111110,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b111111000,
-          0b111111000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b000000000],
-    'G': [0b011111100,
-          0b110000110,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110011110,
-          0b110011110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b011111110,
-          0b000000000],
-    'H': [0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b111111110,
-          0b111111110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b000000000],
-    'I': [0b011111100,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b011111100,
-          0b000000000],
-    'J': [0b000111110,
-          0b000001100,
-          0b000001100,
-          0b000001100,
-          0b000001100,
-          0b000001100,
-          0b000001100,
-          0b000001100,
-          0b000001100,
-          0b110001100,
-          0b110001100,
-          0b011111000,
-          0b000000000],
-    'K': [0b110000110,
-          0b110001100,
-          0b110011000,
-          0b110110000,
-          0b111100000,
-          0b111000000,
-          0b111100000,
-          0b110110000,
-          0b110011000,
-          0b110001100,
-          0b110000110,
-          0b110000110,
-          0b000000000],
-    'L': [0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b111111110,
-          0b000000000],
-    'M': [0b110000110,
-          0b111001110,
-          0b111001110,
-          0b110110110,
-          0b110110110,
-          0b110110110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b000000000],
-    'N': [0b110000110,
-          0b111000110,
-          0b111100110,
-          0b110110110,
-          0b110011110,
-          0b110001110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b000000000],
-    'O': [0b011111100,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b011111100,
-          0b000000000],
-    'P': [0b111111100,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b111111100,
-          0b111111000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b000000000],
-    'Q': [0b011111100,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110001110,
-          0b110011110,
-          0b110110110,
-          0b111100110,
-          0b011111110,
-          0b000000000],
-    'R': [0b111111100,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b111111100,
-          0b111111000,
-          0b110011000,
-          0b110001100,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b000000000],
-    'S': [0b011111110,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b011111100,
-          0b000111110,
-          0b000000110,
-          0b000000110,
-          0b000000110,
-          0b000000110,
-          0b111111100,
-          0b000000000],
-    'T': [0b111111110,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000000000],
-    'U': [0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b011111100,
-          0b000000000],
-    'V': [0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b011001100,
-          0b011001100,
-          0b011001100,
-          0b001111000,
-          0b001111000,
-          0b000110000,
-          0b000110000,
-          0b000000000],
-    'W': [0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110110110,
-          0b110110110,
-          0b110110110,
-          0b011111100,
-          0b011111100,
-          0b011001100,
-          0b011001100,
-          0b000000000],
-    'X': [0b110000110,
-          0b110000110,
-          0b011001100,
-          0b011001100,
-          0b001111000,
-          0b000110000,
-          0b001111000,
-          0b011001100,
-          0b011001100,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b000000000],
-    'Y': [0b110000110,
-          0b110000110,
-          0b011001100,
-          0b011001100,
-          0b001111000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000000000],
-    'Z': [0b111111110,
-          0b000000110,
-          0b000001100,
-          0b000011000,
-          0b000110000,
-          0b001100000,
-          0b011000000,
-          0b011000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b111111110,
-          0b000000000],
-    '0': [0b011111100,
-          0b110000110,
-          0b110001110,
-          0b110011110,
-          0b110111110,
-          0b111101110,
-          0b111001110,
-          0b110001110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b011111100,
-          0b000000000],
-    '1': [0b001100000,
-          0b011100000,
-          0b111100000,
-          0b001100000,
-          0b001100000,
-          0b001100000,
-          0b001100000,
-          0b001100000,
-          0b001100000,
-          0b001100000,
-          0b001100000,
-          0b111111100,
-          0b000000000],
-    '2': [0b011111100,
-          0b110000110,
-          0b000000110,
-          0b000000110,
-          0b000001100,
-          0b000011000,
-          0b000110000,
-          0b001100000,
-          0b011000000,
-          0b110000000,
-          0b110000000,
-          0b111111110,
-          0b000000000],
-    '3': [0b011111100,
-          0b110000110,
-          0b000000110,
-          0b000000110,
-          0b000000110,
-          0b001111100,
-          0b001111100,
-          0b000000110,
-          0b000000110,
-          0b000000110,
-          0b110000110,
-          0b011111100,
-          0b000000000],
-    '4': [0b000001100,
-          0b000011100,
-          0b000111100,
-          0b001101100,
-          0b011001100,
-          0b110001100,
-          0b110001100,
-          0b111111110,
-          0b000001100,
-          0b000001100,
-          0b000001100,
-          0b000001100,
-          0b000000000],
-    '5': [0b111111110,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b111111100,
-          0b000000110,
-          0b000000110,
-          0b000000110,
-          0b000000110,
-          0b110000110,
-          0b011111100,
-          0b000000000],
-    '6': [0b011111100,
-          0b110000110,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b111111100,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b011111100,
-          0b000000000],
-    '7': [0b111111110,
-          0b000000110,
-          0b000000110,
-          0b000001100,
-          0b000011000,
-          0b000110000,
-          0b001100000,
-          0b001100000,
-          0b011000000,
-          0b011000000,
-          0b110000000,
-          0b110000000,
-          0b000000000],
-    '8': [0b011111100,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b011001100,
-          0b001111000,
-          0b011001100,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b011111100,
-          0b000000000],
-    '9': [0b011111100,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b110000110,
-          0b011111110,
-          0b000000110,
-          0b000000110,
-          0b000000110,
-          0b000000110,
-          0b110000110,
-          0b011111100,
-          0b000000000],
-    '!': [0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000000000,
-          0b000000000,
-          0b000110000,
-          0b000110000,
-          0b000000000],
-    '?': [0b011111100,
-          0b110000110,
-          0b000000110,
-          0b000001100,
-          0b000011000,
-          0b000110000,
-          0b000110000,
-          0b000000000,
-          0b000000000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000000000],
-    '.': [0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b001100000,
-          0b001100000,
-          0b000000000],
-    ',': [0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000110000,
-          0b000110000,
-          0b001100000,
-          0b001100000,
-          0b000000000],
-    '-': [0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b111111110,
-          0b111111110,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000],
-    ':': [0b000000000,
-          0b000000000,
-          0b000110000,
-          0b000110000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000000000,
-          0b000110000,
-          0b000110000,
-          0b000000000,
-          0b000000000,
-          0b000000000],
-    '/': [0b000000110,
-          0b000001100,
-          0b000001100,
-          0b000011000,
-          0b000110000,
-          0b000110000,
-          0b001100000,
-          0b011000000,
-          0b011000000,
-          0b110000000,
-          0b110000000,
-          0b000000000,
-          0b000000000],
-    '+': [0b000000000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b111111110,
-          0b111111110,
-          0b000110000,
-          0b000110000,
-          0b000110000,
-          0b000000000,
-          0b000000000,
-          0b000000000],
-    '(': [0b000110000,
-          0b001100000,
-          0b011000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b110000000,
-          0b011000000,
-          0b001100000,
-          0b000110000,
-          0b000000000],
-    ')': [0b001100000,
-          0b000110000,
-          0b000011000,
-          0b000001100,
-          0b000001100,
-          0b000001100,
-          0b000001100,
-          0b000001100,
-          0b000001100,
-          0b000011000,
-          0b000110000,
-          0b001100000,
-          0b000000000],
-}
-FONT_W = 9    # šířka glyfu v bitech
-FONT_H = 13   # výška glyfu v řádcích
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Vykreslení textu do logické mřížky
+# Render text into a logical grid.
 # ─────────────────────────────────────────────────────────────────────────────
 def render_text_to_grid(text, cols, rows, font_scale=1):
     """
-    font_scale: integer, zvětší každý glyf (bilinear scale).
-    char_w = (FONT_W + 1) * font_scale   (+1 mezera)
-    char_h = (FONT_H + 2) * font_scale   (+2 mezera)
+    font_scale: integer scale applied to every glyph pixel.
+    char_w = (FONT_W + 1) * font_scale   (+1 spacing column)
+    char_h = (FONT_H + 2) * font_scale   (+2 spacing rows)
     """
     grid = [[False] * cols for _ in range(rows)]
     cw = (FONT_W + 1) * font_scale
@@ -694,7 +90,7 @@ def render_text_to_grid(text, cols, rows, font_scale=1):
     text = text.upper()
     max_per_line = max(1, (cols - 2) // cw)
 
-    # Zalamování
+    # Word wrap.
     lines = []
     words = text.split()
     current = ""
@@ -715,7 +111,7 @@ def render_text_to_grid(text, cols, rows, font_scale=1):
     start_row = max(1, (rows - total_h) // 2)
 
     for li, line in enumerate(lines):
-        row0 = start_row + li * ch + font_scale  # +1 mezera nahoře
+        row0 = start_row + li * ch + font_scale  # +1 top spacing row
         total_w = len(line) * cw
         start_col = max(1, (cols - total_w) // 2)
 
@@ -725,7 +121,7 @@ def render_text_to_grid(text, cols, rows, font_scale=1):
                 row_bits = bitmap[gy]
                 for gx in range(FONT_W):
                     if row_bits & (1 << (FONT_W - 1 - gx)):
-                        # škálujeme pixel font_scale × font_scale
+                        # Scale each glyph pixel to font_scale x font_scale.
                         for sy in range(font_scale):
                             for sx in range(font_scale):
                                 gr = row0 + gy * font_scale + sy
@@ -736,18 +132,18 @@ def render_text_to_grid(text, cols, rows, font_scale=1):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Načtení obrázku → logická mřížka
+# Load an image into a logical grid.
 # ─────────────────────────────────────────────────────────────────────────────
 def image_to_grid(path, cols, rows, threshold=128):
     """
-    Načte PNG/JPG, převede na stupně šedi, prahuje a škáluje na cols×rows.
-    Černý pixel (< threshold) → True, bílý → False.
-    Obrázek se proporcionálně vejde (letterbox) do cols×rows.
+    Load a PNG/JPG, convert it to grayscale, threshold it, and fit it to cols x rows.
+    Black pixel (< threshold) -> True, white -> False.
+    The image is proportionally letterboxed into cols x rows.
     """
     from PIL import Image as PILImage
-    img = PILImage.open(path).convert('L')   # šedotón 0–255
+    img = PILImage.open(path).convert('L')   # grayscale 0-255
 
-    # Proporcionální fit do cílové mřížky
+    # Proportional fit into the target grid.
     iw, ih = img.size
     scale = min(cols / iw, rows / ih)
     nw = max(1, int(iw * scale))
@@ -767,24 +163,24 @@ def image_to_grid(path, cols, rows, threshold=128):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Naor-Shamir steganografický kodér
-# block_size: 1 = standardní 2×2, 2 = zdvojený 4×4, 4 = zečtyřnásobený 8×8
-# Každý logický pixel → blok (2*block_size)×(2*block_size) subpixelů.
-# Větší blok = tolerantnější vůči nepřesnému zarovnání při překrytí.
+# Naor-Shamir steganographic encoder.
+# block_size: 1 = standard 2x2, 2 = doubled 4x4, 4 = quadrupled 8x8.
+# Every logical pixel becomes a (2*block_size) x (2*block_size) subpixel block.
+# Larger blocks are more tolerant of imperfect physical alignment.
 # ─────────────────────────────────────────────────────────────────────────────
 def encode_visual_stego(src1, src2, hidden, cols, rows, block_size=1):
-    """Vrací (layer1, layer2).
-    Fyzická velikost každé vrstvy: cols*(2*block_size) × rows*(2*block_size)."""
-    bs = 2 * block_size          # délka strany makrobloku
+    """Return (layer1, layer2).
+    Physical size of each layer: cols*(2*block_size) x rows*(2*block_size)."""
+    bs = 2 * block_size          # macroblock side length
     pw, ph = cols * bs, rows * bs
     L1 = [[False] * pw for _ in range(ph)]
     L2 = [[False] * pw for _ in range(ph)]
 
-    # put: vyplní čtvrtiny makrobloku (každá čtvrtina = block_size × block_size)
-    # p = seznam 4 bool hodnot pro 4 čtvrtiny v pořadí TL, TR, BL, BR
+    # Fill macroblock quadrants. Each quadrant is block_size x block_size.
+    # p contains 4 bool values in TL, TR, BL, BR order.
     def put(layer, r, c, p):
         pr, pc = r * bs, c * bs
-        qs = block_size  # čtverec jedné čtvrtiny
+        qs = block_size  # side length of one quadrant
         quadrants = [(0, 0), (0, qs), (qs, 0), (qs, qs)]
         for qi, (dr0, dc0) in enumerate(quadrants):
             val = p[qi]
@@ -796,7 +192,7 @@ def encode_visual_stego(src1, src2, hidden, cols, rows, block_size=1):
         for c in range(cols):
             s1, s2, h = src1[r][c], src2[r][c], hidden[r][c]
 
-            if h:   # hidden BLACK → OR musí dát 4/4
+            if h:   # hidden BLACK -> OR must produce 4/4
                 if s1 and s2:
                     m1 = random.randint(0, 3)
                     m2 = random.choice([x for x in range(4) if x != m1])
@@ -818,7 +214,7 @@ def encode_visual_stego(src1, src2, hidden, cols, rows, block_size=1):
                     for i in range(4):
                         if i in ch: p1[i] = True
                         else:       p2[i] = True
-            else:   # hidden WHITE → OR musí dát 3/4
+            else:   # hidden WHITE -> OR must produce 3/4
                 if s1 and s2:
                     m = random.randint(0, 3)
                     p1 = [True]*4; p1[m] = False; p2 = list(p1)
@@ -850,18 +246,18 @@ def encode_visual_stego(src1, src2, hidden, cols, rows, block_size=1):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Čistá vizuální kryptografie (Naor-Shamir originál)
-# Vrstvy vypadají jako náhodný šum – žádný viditelný text
-# block_size: 1 = standardní 2×2, 2 = zdvojený 4×4, 4 = zečtyřnásobený 8×8
-#   Bílý pixel v tajném: obě vrstvy sdílí stejné 2 čtvrtiny → OR = 2/4 (šedá)
-#   Černý pixel v tajném: vrstvy mají komplementární čtvrtiny → OR = 4/4 (černá)
+# Pure visual cryptography (original Naor-Shamir scheme).
+# Layers look like random noise with no visible text.
+# block_size: 1 = standard 2x2, 2 = doubled 4x4, 4 = quadrupled 8x8.
+#   White secret pixel: both layers share the same 2 quadrants -> OR = 2/4 gray.
+#   Black secret pixel: layers have complementary quadrants -> OR = 4/4 black.
 # ─────────────────────────────────────────────────────────────────────────────
 def encode_visual_crypto(hidden, cols, rows, block_size=1, layer2_key=None):
     """
-    Čistá 2-ze-2 vizuální kryptografie.
-    Vrací (layer1, layer2) — každý vypadá jako náhodný šum.
-    Tajný obraz se odhalí teprve překrytím (OR).
-    Fyzická velikost: cols*(2*block_size) × rows*(2*block_size).
+    Pure 2-of-2 visual cryptography.
+    Returns (layer1, layer2); each layer looks like random noise.
+    The secret image appears only after OR overlay.
+    Physical size: cols*(2*block_size) x rows*(2*block_size).
     """
     bs = 2 * block_size
     pw, ph = cols * bs, rows * bs
@@ -889,17 +285,17 @@ def encode_visual_crypto(hidden, cols, rows, block_size=1, layer2_key=None):
                 put(L2, r, c, p2)
                 continue
 
-            # Náhodně vybereme vzor pro vrstvu 1
+            # Randomly choose the pattern for layer 1.
             pat_idx = random.randint(0, 3)
             p1 = PATTERNS[pat_idx]
 
             if hidden[r][c]:
-                # Černý pixel → OR = 4/4 → vrstva 2 je komplement vrstvy 1
+                # Black pixel -> OR = 4/4, so layer 2 is the complement of layer 1.
                 p2 = [not x for x in p1]
             else:
-                # Bílý pixel → OR < 4/4 → vrstva 2 je JINÝ náhodný vzor (ne komplement)
-                # Komplement by dal OR=4/4 (černý výsledek) — to nechceme.
-                # Zbývají 3 vzory (všechny dají OR=2/4 nebo 3/4, nikdy 4/4).
+                # White pixel -> OR < 4/4, so layer 2 uses another random non-complement pattern.
+                # The complement would produce OR=4/4 (black), which is not wanted.
+                # The remaining 3 patterns all produce OR=2/4 or 3/4, never 4/4.
                 complement = [not x for x in p1]
                 candidates = [p for p in PATTERNS if p != complement]
                 p2 = random.choice(candidates)
@@ -923,15 +319,15 @@ def or_layers(L1, L2, ox=0, oy=0):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Export do PNG (Pillow)
+# Export to PNG (Pillow).
 # ─────────────────────────────────────────────────────────────────────────────
 def export_png(layer, sp_scale, path, dpi=150):
-    """Uloží vrstvu jako PNG. Každý subpixel = sp_scale × sp_scale tiskových px."""
+    """Save a layer as PNG. Every subpixel is sp_scale x sp_scale print pixels."""
     ph = len(layer)
     pw = len(layer[0])
     W = pw * sp_scale
     H = ph * sp_scale
-    img = Image.new("1", (W, H), 1)   # 1-bit, bílá
+    img = Image.new("1", (W, H), 1)   # 1-bit, white
     draw = ImageDraw.Draw(img)
     for r in range(ph):
         for c in range(pw):
@@ -942,7 +338,8 @@ def export_png(layer, sp_scale, path, dpi=150):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GUI – náhledový canvas (škálovaný na obrazovce)
+# GUI preview canvas dimensions (screen-scaled).
 # ─────────────────────────────────────────────────────────────────────────────
-PREVIEW_W = 310   # šířka náhledu v px
-PREVIEW_H = 440   # výška náhledu v px
+PREVIEW_W = 310   # preview width in px
+PREVIEW_H = 440   # preview height in px
+

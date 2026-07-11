@@ -48,6 +48,12 @@ UI_PREVIEW_W = 300
 UI_PREVIEW_H = 180
 OUTPUT_W = 1752
 OUTPUT_H = 1236
+PDF_REGISTRATION_MARK_LINE_W = 2
+PDF_REGISTRATION_MARK_ARM = 14
+PDF_REGISTRATION_MARK_OFFSET = 5
+PDF_LAYER_GAP = 82
+PDF_LAYER_CAPTION_GAP = 6
+PDF_LAYER_CAPTION_FONT_SIZE = 12
 UI_FONT_CONFIGS = {
     1: 1,
     2: 2,
@@ -147,12 +153,37 @@ def _export_png(layer: list[list[bool]], sp_scale: int, path: str, dpi: int = 15
     image.save(path, dpi=(dpi, dpi))
 
 
+def _draw_pdf_registration_marks(
+    draw,
+    bounds: tuple[int, int, int, int],
+    page_size: tuple[int, int],
+    line_width: int = PDF_REGISTRATION_MARK_LINE_W,
+) -> None:
+    x, y, width, height = bounds
+    page_w, page_h = page_size
+    arm = min(PDF_REGISTRATION_MARK_ARM, max(4, min(width, height) // 12))
+    offset = PDF_REGISTRATION_MARK_OFFSET
+    centers = (
+        (
+            max(arm, x - offset - arm),
+            max(arm, y - offset - arm),
+        ),
+        (
+            min(page_w - arm - 1, x + width + offset + arm),
+            min(page_h - arm - 1, y + height + offset + arm),
+        ),
+    )
+    for cx, cy in centers:
+        draw.line((cx - arm, cy, cx + arm, cy), fill=(0, 0, 0), width=line_width)
+        draw.line((cx, cy - arm, cx, cy + arm), fill=(0, 0, 0), width=line_width)
+
+
 def _export_sources_pdf(
     layer1: list[list[bool]],
     layer2: list[list[bool]],
     sp_scale: int,
     path: str,
-    footer_lines: list[str] | None = None,
+    caption_line: str | None = None,
     dpi: int = 150,
 ) -> None:
     from PIL import Image as PILImage
@@ -160,38 +191,42 @@ def _export_sources_pdf(
     from PIL import ImageFont
 
     page = PILImage.new("RGB", (PRINT_W, PRINT_H), "white")
+    draw = ImageDraw.Draw(page)
+    try:
+        font = ImageFont.truetype("arial.ttf", PDF_LAYER_CAPTION_FONT_SIZE)
+    except OSError:
+        font = ImageFont.load_default()
+    caption_gap = PDF_LAYER_CAPTION_GAP if caption_line else 0
+    caption_h = 0
+    if caption_line:
+        text_bbox = draw.textbbox((0, 0), caption_line, font=font)
+        caption_h = caption_gap + (text_bbox[3] - text_bbox[1])
+
     source_images = [
         _layer_to_pil(layer1, sp_scale, dpi).convert("RGB"),
         _layer_to_pil(layer2, sp_scale, dpi).convert("RGB"),
     ]
     margin = int(dpi * 0.75)  # roughly 1.9 cm at 150 DPI
-    gap = int(dpi * 0.35)     # roughly 0.9 cm between layers
-    footer_h = int(dpi * 0.35) if footer_lines else 0
+    gap = PDF_LAYER_GAP
     content_w = PRINT_W - 2 * margin
-    content_h = PRINT_H - 2 * margin - footer_h
-    max_item_h = (content_h - gap) // 2
+    content_h = PRINT_H - 2 * margin
+    max_item_h = (content_h - gap - 2 * caption_h) // 2
     prepared = []
     for image in source_images:
         scale = min(content_w / image.width, max_item_h / image.height)
         target_size = (max(1, int(image.width * scale)), max(1, int(image.height * scale)))
-        prepared.append(image.resize(target_size, PILImage.Resampling.LANCZOS))
+        prepared_image = image.resize(target_size, PILImage.Resampling.LANCZOS)
+        prepared.append(prepared_image)
 
-    total_h = sum(image.height for image in prepared) + gap
+    total_h = sum(image.height for image in prepared) + gap + len(prepared) * caption_h
     y = margin + max(0, (content_h - total_h) // 2)
     for image in prepared:
         x = margin + max(0, (content_w - image.width) // 2)
         page.paste(image, (x, y))
-        y += image.height + gap
-    if footer_lines:
-        draw = ImageDraw.Draw(page)
-        try:
-            font = ImageFont.truetype("arial.ttf", 12)
-        except OSError:
-            font = ImageFont.load_default()
-        footer_y = PRINT_H - margin - footer_h + 4
-        for line in footer_lines:
-            draw.text((margin, footer_y), line, fill=(80, 80, 80), font=font)
-            footer_y += 16
+        _draw_pdf_registration_marks(draw, (x, y, image.width, image.height), page.size)
+        if caption_line:
+            draw.text((x, y + image.height + caption_gap), caption_line, fill=(80, 80, 80), font=font)
+        y += image.height + caption_h + gap
     page.save(path, "PDF", resolution=float(dpi))
 
 
@@ -360,10 +395,10 @@ class GenerateWorker(QObject):
 
             layer2_label = "key" if mode == "crypto" and self.params.get("layer2_key") else "random"
             size_text = (
-                f"Tiskova velikost/export: {OUTPUT_W} x {OUTPUT_H} px | "
-                f"mrizka: {len(layer1[0])} x {len(layer1)} px | "
-                f"pixel blok: {pixel_side}x{pixel_side} (@150 DPI, landscape)"
-                f" | vrstva2: {layer2_label}"
+                f"Print/export size: {OUTPUT_W} x {OUTPUT_H} px | "
+                f"grid: {len(layer1[0])} x {len(layer1)} px | "
+                f"pixel block: {pixel_side}x{pixel_side} (@150 DPI, landscape)"
+                f" | layer 2: {layer2_label}"
             )
             self.finished.emit(
                 {
@@ -488,8 +523,8 @@ class MainWindow(QWidget):
 
         self.tabs = QTabWidget()
         self.tabs.currentChanged.connect(self._tab_changed)
-        self.tabs.addTab(self._build_create_tab(), "Tvorba vrstev")
-        self.tabs.addTab(self._build_verify_tab(), "Kontrola prekryti")
+        self.tabs.addTab(self._build_create_tab(), "Create Layers")
+        self.tabs.addTab(self._build_verify_tab(), "Overlay Check")
         root.addWidget(self.tabs, stretch=1)
 
     def _build_header(self, subtitle: str = "A4, 150 DPI, Naor-Shamir") -> QWidget:
@@ -529,28 +564,28 @@ class MainWindow(QWidget):
 
         left.addWidget(self._build_settings_tabs(), stretch=1)
 
-        hint = QLabel("Pretahnete Vrstvu 2 mysi, nebo pouzijte sipky pro jemne doladeni zarovnani.")
+        hint = QLabel("Drag Layer 2 with the mouse, or use arrow keys for fine alignment.")
         hint.setObjectName("Muted")
         hint.setWordWrap(True)
         hint.setMinimumWidth(0)
         hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         left.addWidget(hint)
 
-        self.cv1 = PreviewPanel("Vrstva 1")
-        self.cv2 = PreviewPanel("Vrstva 2 - pretahni", draggable=True)
-        self.cvR = PreviewPanel("Vysledek (OR prekryti)")
+        self.cv1 = PreviewPanel("Layer 1")
+        self.cv2 = PreviewPanel("Layer 2 - drag", draggable=True)
+        self.cvR = PreviewPanel("Result (OR overlay)")
         self.cv2.set_drag_handlers(self._drag_motion, self._drag_end, self._drag_begin)
         for panel in (self.cv1, self.cv2, self.cvR):
             right.addWidget(panel, stretch=1)
 
         status = QHBoxLayout()
-        status.addWidget(QLabel("Posun vrstvy 2:"))
+        status.addWidget(QLabel("Layer 2 offset:"))
         self.offset_label = QLabel("X=0  Y=0")
         self.offset_label.setObjectName("Accent")
         status.addWidget(self.offset_label)
         self.size_label = QLabel("")
         self.size_label.setObjectName("Muted")
-        reset_btn = QPushButton("Resetovat")
+        reset_btn = QPushButton("Reset")
         reset_btn.clicked.connect(self.reset_offset)
         status.addWidget(reset_btn)
         status.addStretch()
@@ -584,7 +619,7 @@ class MainWindow(QWidget):
         self.generate_progress = QProgressBar()
         self.generate_progress.setRange(0, 100)
         self.generate_progress.setValue(0)
-        self.generate_progress.setFormat("Pripraveno")
+        self.generate_progress.setFormat("Ready")
         inputs.addWidget(self.generate_progress)
         inputs.addWidget(self._build_settings_summary_box())
         inputs.addStretch()
@@ -598,13 +633,13 @@ class MainWindow(QWidget):
         settings.addWidget(text_box)
         settings.addStretch()
 
-        tabs.addTab(inputs_tab, "Vstupy")
-        tabs.addTab(settings_tab, "Nastaveni")
+        tabs.addTab(inputs_tab, "Inputs")
+        tabs.addTab(settings_tab, "Settings")
         self._update_settings_summary()
         return tabs
 
     def _build_settings_summary_box(self) -> QGroupBox:
-        box = QGroupBox("Nastaveni")
+        box = QGroupBox("Settings")
         layout = QVBoxLayout(box)
         layout.setContentsMargins(10, 10, 10, 10)
         self.settings_summary_label = QLabel("")
@@ -614,19 +649,19 @@ class MainWindow(QWidget):
         return box
 
     def _build_mode_box(self) -> QGroupBox:
-        box = QGroupBox("Rezim a velikost pixelu")
+        box = QGroupBox("Mode and Pixel Size")
         layout = QGridLayout(box)
         layout.setHorizontalSpacing(14)
         layout.setVerticalSpacing(8)
 
         self.mode_group = QButtonGroup(self)
-        crypto = QRadioButton("Vizualni kryptografie")
+        crypto = QRadioButton("Visual cryptography")
         crypto.setChecked(True)
-        stego = QRadioButton("Vizualni steganografie")
+        stego = QRadioButton("Visual steganography")
         self.mode_group.addButton(crypto, 0)
         self.mode_group.addButton(stego, 1)
         self.mode_group.idClicked.connect(lambda _id: self._on_mode_change())
-        layout.addWidget(QLabel("Rezim:"), 0, 0)
+        layout.addWidget(QLabel("Mode:"), 0, 0)
         layout.addWidget(crypto, 0, 1)
         layout.addWidget(stego, 0, 2)
 
@@ -642,7 +677,7 @@ class MainWindow(QWidget):
         return box
 
     def _build_layer2_box(self) -> QGroupBox:
-        box = QGroupBox("Vrstva 2")
+        box = QGroupBox("Layer 2")
         layout = QGridLayout(box)
         layout.setHorizontalSpacing(8)
         layout.setVerticalSpacing(6)
@@ -657,11 +692,11 @@ class MainWindow(QWidget):
 
         layout.addWidget(self.layer2_random, 0, 0, 1, 2)
         layout.addWidget(self.layer2_keyed, 1, 0, 1, 2)
-        layout.addWidget(QLabel("Klic:"), 2, 0)
+        layout.addWidget(QLabel("Key:"), 2, 0)
         self.layer2_key = QLineEdit()
-        self.layer2_key.setPlaceholderText("slovo nebo heslo")
+        self.layer2_key.setPlaceholderText("word or password")
         layout.addWidget(self.layer2_key, 2, 1)
-        note = QLabel("Plati pro kryptografii; stejny klic a rozliseni da stejnou Vrstvu 2.")
+        note = QLabel("Used in cryptography mode; the same key and resolution produce the same Layer 2.")
         note.setObjectName("Muted")
         note.setWordWrap(True)
         layout.addWidget(note, 3, 0, 1, 2)
@@ -669,13 +704,13 @@ class MainWindow(QWidget):
         return box
 
     def _build_input_box(self) -> QGroupBox:
-        box = QGroupBox("Vstupy")
+        box = QGroupBox("Inputs")
         layout = QGridLayout(box)
         layout.setHorizontalSpacing(8)
         layout.setVerticalSpacing(8)
 
         self.e1 = QLineEdit("STEGO")
-        self.e2 = QLineEdit("RYBA")
+        self.e2 = QLineEdit("FISH")
         self.eh = QLineEdit("12356")
         for edit in (self.e1, self.e2, self.eh):
             edit.setMaximumWidth(260)
@@ -683,13 +718,13 @@ class MainWindow(QWidget):
         self._text_labels: dict[str, QLabel] = {}
 
         for row, (key, label, edit) in enumerate(
-            [("e1", "Text vrstvy 1:", self.e1), ("e2", "Text vrstvy 2:", self.e2), ("eh", "Tajny text:", self.eh)]
+            [("e1", "Layer 1 text:", self.e1), ("e2", "Layer 2 text:", self.e2), ("eh", "Secret text:", self.eh)]
         ):
             text_label = QLabel(label)
             self._text_labels[key] = text_label
             layout.addWidget(text_label, row, 0)
             layout.addWidget(edit, row, 1)
-            pick = QPushButton("Obrazek")
+            pick = QPushButton("Image")
             pick.setMaximumWidth(110)
             pick.clicked.connect(lambda _checked=False, slot=key: self._pick_image(slot))
             setattr(self, f"_pick_{key}", pick)
@@ -706,7 +741,7 @@ class MainWindow(QWidget):
             layout.addWidget(name, row, 4)
 
         actions = QHBoxLayout()
-        self.generate_btn = QPushButton("Generovat")
+        self.generate_btn = QPushButton("Generate")
         self.generate_btn.setObjectName("PrimaryButton")
         self.generate_btn.clicked.connect(self.generate)
         actions.addWidget(self.generate_btn)
@@ -725,18 +760,18 @@ class MainWindow(QWidget):
         return box
 
     def _build_text_settings_box(self) -> QGroupBox:
-        box = QGroupBox("Font a pozice")
+        box = QGroupBox("Font and Position")
         layout = QGridLayout(box)
         layout.setHorizontalSpacing(8)
         layout.setVerticalSpacing(6)
 
-        layout.addWidget(QLabel("Velikost fontu:"), 0, 0)
+        layout.addWidget(QLabel("Font size:"), 0, 0)
         font_row = QHBoxLayout()
         font_row.setSpacing(6)
         self.font_group = QButtonGroup(self)
         for value, label in [(1, "1"), (2, "2"), (3, "3")]:
             button = QRadioButton(label)
-            button.setToolTip({1: "Maly", 2: "Stredni", 3: "Velky"}[value])
+            button.setToolTip({1: "Small", 2: "Medium", 3: "Large"}[value])
             if value == 2:
                 button.setChecked(True)
             self.font_group.addButton(button, value)
@@ -745,31 +780,31 @@ class MainWindow(QWidget):
         font_row.addStretch()
         layout.addLayout(font_row, 0, 1, 1, 3)
 
-        layout.addWidget(QLabel("Pozice:"), 1, 0)
+        layout.addWidget(QLabel("Position:"), 1, 0)
         self.text_h_align = QComboBox()
-        self.text_h_align.addItem("Vlevo", "left")
-        self.text_h_align.addItem("Na stred", "center")
-        self.text_h_align.addItem("Vpravo", "right")
+        self.text_h_align.addItem("Left", "left")
+        self.text_h_align.addItem("Center", "center")
+        self.text_h_align.addItem("Right", "right")
         self.text_h_align.setCurrentIndex(1)
         layout.addWidget(self.text_h_align, 1, 1)
         self.text_v_align = QComboBox()
-        self.text_v_align.addItem("Nahore", "top")
-        self.text_v_align.addItem("Na stred", "center")
-        self.text_v_align.addItem("Dole", "bottom")
+        self.text_v_align.addItem("Top", "top")
+        self.text_v_align.addItem("Center", "center")
+        self.text_v_align.addItem("Bottom", "bottom")
         self.text_v_align.setCurrentIndex(1)
         layout.addWidget(self.text_v_align, 1, 2)
 
         layout.addWidget(QLabel("X"), 2, 0)
         self.text_offset_x = QSpinBox()
         self.text_offset_x.setRange(-999, 999)
-        self.text_offset_x.setToolTip("Posun textu v logickych pixelech")
+        self.text_offset_x.setToolTip("Text offset in logical pixels")
         layout.addWidget(self.text_offset_x, 2, 1)
         layout.addWidget(QLabel("Y"), 2, 2)
         self.text_offset_y = QSpinBox()
         self.text_offset_y.setRange(-999, 999)
-        self.text_offset_y.setToolTip("Posun textu v logickych pixelech")
+        self.text_offset_y.setToolTip("Text offset in logical pixels")
         layout.addWidget(self.text_offset_y, 2, 3)
-        center_btn = QPushButton("Vycentrovat")
+        center_btn = QPushButton("Center")
         center_btn.clicked.connect(self._reset_text_position)
         layout.addWidget(center_btn, 3, 1, 1, 3)
         return box
@@ -792,56 +827,56 @@ class MainWindow(QWidget):
         right.setContentsMargins(4, 4, 4, 4)
         right.setSpacing(4)
 
-        left.addWidget(self._build_header("kontrola fyzickeho prekryti"))
+        left.addWidget(self._build_header("physical overlay check"))
 
-        top = QGroupBox("Kontrola fyzickeho prekryti dvou vrstev")
+        top = QGroupBox("Physical Overlay Check")
         grid = QGridLayout(top)
         self.v_path1_label = QLabel("")
         self.v_path1_label.setObjectName("Muted")
         self.v_path2_label = QLabel("")
         self.v_path2_label.setObjectName("Muted")
-        grid.addWidget(QLabel("Vrstva 1:"), 0, 0)
+        grid.addWidget(QLabel("Layer 1:"), 0, 0)
         grid.addWidget(self.v_path1_label, 0, 1)
-        pick1 = QPushButton("Otevrit")
+        pick1 = QPushButton("Open")
         pick1.clicked.connect(lambda: self._v_pick(1))
         grid.addWidget(pick1, 0, 2)
-        grid.addWidget(QLabel("Vrstva 2:"), 1, 0)
+        grid.addWidget(QLabel("Layer 2:"), 1, 0)
         grid.addWidget(self.v_path2_label, 1, 1)
-        pick2 = QPushButton("Otevrit")
+        pick2 = QPushButton("Open")
         pick2.clicked.connect(lambda: self._v_pick(2))
         grid.addWidget(pick2, 1, 2)
-        compute = QPushButton("Zobrazit prekryti")
+        compute = QPushButton("Show Overlay")
         compute.setObjectName("PrimaryButton")
         compute.clicked.connect(self._v_compute)
         grid.addWidget(compute, 0, 3)
-        save = QPushButton("Ulozit vysledek")
+        save = QPushButton("Save Result")
         save.clicked.connect(self._v_export)
         save.setEnabled(HAS_PIL)
         grid.addWidget(save, 1, 3)
-        self.v_info_label = QLabel("Nactete obe vrstvy a kliknete na Zobrazit prekryti.")
+        self.v_info_label = QLabel("Load both layers and click Show Overlay.")
         self.v_info_label.setObjectName("Muted")
         self.v_info_label.setWordWrap(True)
         grid.addWidget(self.v_info_label, 2, 0, 1, 4)
         left.addWidget(top)
 
-        hint = QLabel("Vrstvu 2 lze pretahnout mysi, sipky posouvaji aktivni zalozku o 1 px.")
+        hint = QLabel("Drag Layer 2 with the mouse; arrow keys move the active tab by 1 px.")
         hint.setObjectName("Muted")
         hint.setWordWrap(True)
         left.addWidget(hint)
 
-        self.v_cv1 = PreviewPanel("Vrstva 1")
-        self.v_cv2 = PreviewPanel("Vrstva 2 - pretahni", draggable=True)
-        self.v_cvR = PreviewPanel("Vysledek (OR prekryti)")
+        self.v_cv1 = PreviewPanel("Layer 1")
+        self.v_cv2 = PreviewPanel("Layer 2 - drag", draggable=True)
+        self.v_cvR = PreviewPanel("Result (OR overlay)")
         self.v_cv2.set_drag_handlers(self._v_drag_motion, self._v_drag_end, self._v_drag_begin)
         for panel in (self.v_cv1, self.v_cv2, self.v_cvR):
             right.addWidget(panel, stretch=1)
 
         status = QHBoxLayout()
-        status.addWidget(QLabel("Posun vrstvy 2:"))
+        status.addWidget(QLabel("Layer 2 offset:"))
         self.v_offset_label = QLabel("X=0  Y=0")
         self.v_offset_label.setObjectName("Accent")
         status.addWidget(self.v_offset_label)
-        reset = QPushButton("Resetovat")
+        reset = QPushButton("Reset")
         reset.clicked.connect(self._v_reset)
         status.addWidget(reset)
         status.addStretch()
@@ -872,13 +907,13 @@ class MainWindow(QWidget):
         return PIXEL_MODES.get(checked, PIXEL_MODES[2])
 
     def _settings_summary_text(self) -> str:
-        mode = "krypto" if self._mode() == "crypto" else "stego"
+        mode = "crypto" if self._mode() == "crypto" else "stego"
         pixel = str(self._pixel_config()["label"])
         layer2 = "key" if self._mode() == "crypto" and self._layer2_mode() == "key" else "random"
         font_id = self.font_group.checkedId()
         if font_id not in UI_FONT_CONFIGS:
             font_id = 2
-        return f"Nastaveni: {mode} | pixel {pixel} | vrstva2 {layer2} | font {font_id}"
+        return f"Settings: {mode} | pixel {pixel} | layer 2 {layer2} | font {font_id}"
 
     def _update_settings_summary(self) -> None:
         if hasattr(self, "settings_summary_label"):
@@ -914,14 +949,14 @@ class MainWindow(QWidget):
 
     def _update_preview_titles(self) -> None:
         if self._mode() == "stego":
-            self.cv1.set_title("Vrstva 1 (s textem/obr.)")
-            self.cv2.set_title("Vrstva 2 - pretahni")
+            self.cv1.set_title("Layer 1 (text/image)")
+            self.cv2.set_title("Layer 2 - drag")
         elif self._layer2_mode() == "key":
-            self.cv1.set_title("Vrstva 1 (pro klic)")
-            self.cv2.set_title("Vrstva 2 (deterministicky sum)")
+            self.cv1.set_title("Layer 1 (for key)")
+            self.cv2.set_title("Layer 2 (deterministic noise)")
         else:
-            self.cv1.set_title("Vrstva 1 (nahodny sum)")
-            self.cv2.set_title("Vrstva 2 - pretahni")
+            self.cv1.set_title("Layer 1 (random noise)")
+            self.cv2.set_title("Layer 2 - drag")
 
     def _on_mode_change(self) -> None:
         is_stego = self._mode() == "stego"
@@ -932,7 +967,7 @@ class MainWindow(QWidget):
             getattr(self, f"_clear_{key}").setEnabled(is_stego)
             self._text_labels[key].setEnabled(is_stego)
             self._name_labels[key].setEnabled(is_stego)
-        self._text_labels["eh"].setText("Tajny text:" if is_stego else "Tajny text (jediny vstup):")
+        self._text_labels["eh"].setText("Secret text:" if is_stego else "Secret text (only input):")
         self._on_layer2_mode_change()
         self._update_settings_summary()
         if hasattr(self, "cv1"):
@@ -941,9 +976,9 @@ class MainWindow(QWidget):
     def _pick_image(self, key: str) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            f"Vyberte obrazek ({key})",
+            f"Select image ({key})",
             "",
-            "Obrazky (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;Vsechny soubory (*.*)",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All files (*.*)",
         )
         if not path:
             return
@@ -963,7 +998,7 @@ class MainWindow(QWidget):
             try:
                 return image_to_grid(path, cols, rows)
             except Exception as exc:
-                QMessageBox.critical(self, "Chyba nacteni obrazku", f"Nelze nacist {path}:\n{exc}")
+                QMessageBox.critical(self, "Image Load Error", f"Cannot load {path}:\n{exc}")
                 return [[False] * cols for _ in range(rows)]
         text = getattr(self, key).text().strip() or "TEXT"
         grid = render_text_to_grid(text, cols, rows, font_scale)
@@ -989,7 +1024,7 @@ class MainWindow(QWidget):
         if self._mode() == "crypto" and self._layer2_mode() == "key":
             layer2_key = self.layer2_key.text().strip()
             if not layer2_key:
-                QMessageBox.warning(self, "Chybi klic", "Zadejte slovo nebo heslo pro deterministickou Vrstvu 2.")
+                QMessageBox.warning(self, "Missing Key", "Enter a word or password for deterministic Layer 2.")
                 return
 
         params = {
@@ -1011,7 +1046,7 @@ class MainWindow(QWidget):
             },
         }
 
-        self._set_generation_progress(True, "Generuji...")
+        self._set_generation_progress(True, "Generating...")
         self._generate_thread = QThread(self)
         self._generate_worker = GenerateWorker(params)
         self._generate_worker.moveToThread(self._generate_thread)
@@ -1033,11 +1068,11 @@ class MainWindow(QWidget):
         self.sp_scale = int(data.get("sp_scale", 1))
         self.size_label.setText(str(data.get("size_text", "")))
         self.reset_offset()
-        self._set_generation_progress(False, "Hotovo")
+        self._set_generation_progress(False, "Done")
 
     def _generate_failed(self, message: str) -> None:
-        self._set_generation_progress(False, "Chyba")
-        QMessageBox.critical(self, "Chyba generovani", message)
+        self._set_generation_progress(False, "Error")
+        QMessageBox.critical(self, "Generation Error", message)
 
     def _generate_thread_finished(self) -> None:
         self._generate_thread = None
@@ -1095,17 +1130,17 @@ class MainWindow(QWidget):
 
     def export_all(self) -> None:
         if not HAS_PIL:
-            QMessageBox.critical(self, "Chyba", "Pillow neni nainstalovan.\npip install pillow")
+            QMessageBox.critical(self, "Error", "Pillow is not installed.\npip install pillow")
             return
         if self.layer1 is None or self.layer2 is None:
-            QMessageBox.warning(self, "Pozor", "Nejprve vygenerujte obrazky.")
+            QMessageBox.warning(self, "Warning", "Generate the images first.")
             return
-        folder = QFileDialog.getExistingDirectory(self, "Vyberte slozku pro export PNG")
+        folder = QFileDialog.getExistingDirectory(self, "Select PNG Export Folder")
         if not folder:
             return
-        p1 = os.path.join(folder, "vrstva1.png")
-        p2 = os.path.join(folder, "vrstva2.png")
-        pr = os.path.join(folder, "vysledek.png")
+        p1 = os.path.join(folder, "layer1.png")
+        p2 = os.path.join(folder, "layer2.png")
+        pr = os.path.join(folder, "result.png")
         _export_png(self.layer1, self.sp_scale, p1)
         _export_png(self.layer2, self.sp_scale, p2)
         _export_png(or_layers(self.layer1, self.layer2, 0, 0), self.sp_scale, pr)
@@ -1113,22 +1148,22 @@ class MainWindow(QWidget):
         ph = len(self.layer1) * self.sp_scale
         QMessageBox.information(
             self,
-            "Export dokoncen",
-            f"Ulozeno do:\n{folder}\n\nvrstva1.png\nvrstva2.png\nvysledek.png\n\nRozmery: {pw} x {ph} px",
+            "Export Complete",
+            f"Saved to:\n{folder}\n\nlayer1.png\nlayer2.png\nresult.png\n\nSize: {pw} x {ph} px",
         )
 
     def export_pdf(self) -> None:
         if not HAS_PIL:
-            QMessageBox.critical(self, "Chyba", "Pillow neni nainstalovan.\npip install pillow")
+            QMessageBox.critical(self, "Error", "Pillow is not installed.\npip install pillow")
             return
         if self.layer1 is None or self.layer2 is None:
-            QMessageBox.warning(self, "Pozor", "Nejprve vygenerujte obrazky.")
+            QMessageBox.warning(self, "Warning", "Generate the images first.")
             return
         created_at = datetime.now()
         default_name = created_at.strftime("export_%y%m%d_%H%M.pdf")
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Ulozit PDF se zdrojovymi vrstvami",
+            "Save PDF with Source Layers",
             default_name,
             "PDF (*.pdf)",
         )
@@ -1137,27 +1172,21 @@ class MainWindow(QWidget):
         font_size = self.font_group.checkedId()
         if font_size not in UI_FONT_CONFIGS:
             font_size = 2
-        pixel_config = self._pixel_config()
-        pixel_side = int(pixel_config["side"])
         layer2_label = "key" if self._mode() == "crypto" and self._layer2_mode() == "key" else "random"
-        footer_lines = [
-            (
-                f"Rozmer: {OUTPUT_W} x {OUTPUT_H} px | "
-                f"pixel blok: {pixel_side}x{pixel_side} | "
-                f"font: {font_size} | vrstva2: {layer2_label} | "
-                f"vytvoreno: {created_at.strftime('%Y-%m-%d %H:%M')}"
-            ),
-            "Visual Steganography | zdrojove vrstvy 1 a 2 | A4 @ 150 DPI",
-        ]
-        _export_sources_pdf(self.layer1, self.layer2, self.sp_scale, path, footer_lines=footer_lines)
-        QMessageBox.information(self, "Export dokoncen", f"PDF ulozeno:\n{path}")
+        caption_line = (
+            f"{OUTPUT_W}x{OUTPUT_H} px | "
+            f"font {font_size} {layer2_label} | "
+            f"A4 150 dpi | {created_at.strftime('%Y-%m-%d %H:%M')}"
+        )
+        _export_sources_pdf(self.layer1, self.layer2, self.sp_scale, path, caption_line=caption_line)
+        QMessageBox.information(self, "Export Complete", f"PDF saved:\n{path}")
 
     def _v_pick(self, which: int) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            f"Vyberte PNG vrstvu {which}",
+            f"Select PNG layer {which}",
             "",
-            "Obrazky (*.png *.jpg *.jpeg *.bmp);;Vsechny soubory (*.*)",
+            "Images (*.png *.jpg *.jpeg *.bmp);;All files (*.*)",
         )
         if not path:
             return
@@ -1170,22 +1199,22 @@ class MainWindow(QWidget):
 
     def _v_compute(self) -> None:
         if not self._v_path1 or not self._v_path2:
-            QMessageBox.warning(self, "Chybi soubory", "Nactete obe vrstvy.")
+            QMessageBox.warning(self, "Missing Files", "Load both layers.")
             return
         if not HAS_PIL:
-            QMessageBox.critical(self, "Chyba", "Pro nacitani PNG je nutny Pillow.\npip install pillow")
+            QMessageBox.critical(self, "Error", "Pillow is required to load PNG files.\npip install pillow")
             return
         try:
             self._v_layer1 = _png_to_bool_grid(self._v_path1)
             self._v_layer2 = _png_to_bool_grid(self._v_path2)
         except Exception as exc:
-            QMessageBox.critical(self, "Chyba nacteni", str(exc))
+            QMessageBox.critical(self, "Load Error", str(exc))
             return
         h1 = len(self._v_layer1)
         w1 = len(self._v_layer1[0])
         h2 = len(self._v_layer2)
         w2 = len(self._v_layer2[0])
-        self.v_info_label.setText(f"Vrstva 1: {w1}x{h1} px | Vrstva 2: {w2}x{h2} px")
+        self.v_info_label.setText(f"Layer 1: {w1}x{h1} px | Layer 2: {w2}x{h2} px")
         self._v_reset()
 
     def _v_draw(self) -> None:
@@ -1240,19 +1269,19 @@ class MainWindow(QWidget):
 
     def _v_export(self) -> None:
         if self._v_layer1 is None or self._v_layer2 is None:
-            QMessageBox.warning(self, "Pozor", "Nejprve nactete a zobrazte prekryti.")
+            QMessageBox.warning(self, "Warning", "Load and show the overlay first.")
             return
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Ulozit vysledek prekryti",
-            "prekryti_vysledek.png",
+            "Save Overlay Result",
+            "overlay_result.png",
             "PNG (*.png)",
         )
         if not path:
             return
         merged = or_layers(self._v_layer1, self._v_layer2, self._v_offset_x, self._v_offset_y)
         _save_bool_grid_native(merged, path)
-        QMessageBox.information(self, "Ulozeno", f"Vysledek ulozen:\n{path}")
+        QMessageBox.information(self, "Saved", f"Result saved:\n{path}")
 
     def _tab_changed(self, _index: int) -> None:
         self.setFocus()
