@@ -1,0 +1,5 @@
+﻿qrcode[pil]>=8.0
+python-dotenv>=1.0.1
+PyQt6>=6.7
+pillow>=9.0
+
